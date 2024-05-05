@@ -182,8 +182,42 @@ void clear_screen(const sdl_t sdl, const config_t config)
 	SDL_RenderClear(sdl.renderer);
 }
 
-void update_screen(const sdl_t sdl)
+void update_screen(const sdl_t sdl, const chip8_t chip8, const config_t config)
 {
+	SDL_Rect rect = {.x = 0, .y = 0, .w = config.scale_factor, .h = config.scale_factor};
+
+	const uint8_t fg_r = (config.fg_color >> 24) & 0xFF;
+	const uint8_t fg_g = (config.fg_color >> 16) & 0xFF;
+	const uint8_t fg_b = (config.fg_color >> 8) & 0xFF;
+	const uint8_t fg_a = (config.fg_color >> 0) & 0xFF;
+
+	const uint8_t bg_r = (config.bg_color >> 24) & 0xFF;
+	const uint8_t bg_g = (config.bg_color >> 16) & 0xFF;
+	const uint8_t bg_b = (config.bg_color >> 8) & 0xFF;
+	const uint8_t bg_a = (config.bg_color >> 0) & 0xFF;
+
+	// Помини низ сите пиксели, цртај правоаголник по пиксел на SDL window
+	for (uint32_t i = 0; i < sizeof chip8.display; i++)
+	{
+		// Транслација 1D индекс i вредност во 2D X/Y координати
+		// X = i % window_width
+		// Y = i / window_width
+		rect.x = (i % config.window_width) * config.scale_factor;
+		rect.y = (i / config.window_width) * config.scale_factor;
+
+		if (chip8.display[i])
+		{
+			// Ако пикселот е вклучен, искористи fg_color
+			SDL_SetRenderDrawColor(sdl.renderer, fg_r, fg_g, fg_b, fg_a);
+			SDL_RenderFillRect(sdl.renderer, &rect);
+		}
+		else
+		{
+			// Пикселот е исклучен, искористи bg_color
+			SDL_SetRenderDrawColor(sdl.renderer, bg_r, bg_g, bg_b, bg_a);
+			SDL_RenderFillRect(sdl.renderer, &rect);
+		}
+	}
 	SDL_RenderPresent(sdl.renderer);
 }
 
@@ -208,7 +242,6 @@ void handle_input(chip8_t *chip8)
 				if (chip8->state == RUNNING)
 				{
 					chip8->state = PAUSED;
-					printf("Enum value: %d\n", (int)chip8->state);
 					puts("==== PAUSED ====");
 				}
 				else
@@ -230,7 +263,7 @@ void handle_input(chip8_t *chip8)
 }
 
 #ifdef DEBUG
-void print_debug_info(chip8_t *chip8)
+void print_debug_info(chip8_t *chip8, const config_t config)
 {
 	printf("Address: 0x%04X, Opcode: 0x%04X Desc:", chip8->PC - 2, chip8->inst.opcode);
 	switch ((chip8->inst.opcode >> 12) & 0x0F)
@@ -250,11 +283,48 @@ void print_debug_info(chip8_t *chip8)
 			chip8->PC = *--chip8->stack_ptr;
 		}
 		break;
-	case 0x02:
-		//
-		*chip8->stack_ptr++ = chip8->PC; // Store current address to return to on subroutine stack
-		chip8->PC = chip8->inst.NNN;	 // set PC to subroutine address so that the next opcode is gotten from there.
+	case 0x01:
+	{
+		// 0x1NNN: Jump to address NNN
+		printf("Jump to address NNN (0x%04X)\n", chip8->inst.NNN); // Set PC so that next opcode is from NNN.
 		break;
+	}
+	case 0x02:
+	{
+		//
+		printf("SET Program Counter PC to NNN (0x%04X)\n", chip8->inst.NNN);
+		break;
+	}
+
+	case 0x06:
+	{
+		// 0x6XNN: Set register VX to NN
+		printf("Set register V%X to NN (0x%02X)\n", chip8->inst.X, chip8->inst.NN);
+		break;
+	}
+	case 0x07:
+	{
+		// 0x7XNN: Set register VX += NN
+		printf("Set register V%X (0x%02X) += NN (0x%02X). Result: 0x%02X\n", chip8->inst.X, chip8->V[chip8->inst.X], chip8->inst.NN, chip8->V[chip8->inst.X] + chip8->inst.NN);
+		break;
+	}
+	case 0x0A:
+	{
+		// 0xANNN: SET index register I to NNN
+		printf("SET index register I to NNN (0x%04X)\n", chip8->inst.NNN);
+		break;
+	}
+	case 0x0D:
+	{
+		// 0xDXYN: Draw N-height sprite at coords X,Y; Read from mem location I;
+		// Screen pixels are XOR'd with sprite bits,
+		// VF carry flag is set any screen pixles are set off; This is useful for collision detection or other reasons
+		printf("Draw N (%u) height sprite at coords V%X (0x%02X), V%X (0x%02X) "
+			   "from memory location I (0x%04X). Set VF = 1 if any pixels are turned off. \n",
+			   chip8->inst.N, chip8->inst.X, chip8->V[chip8->inst.X], chip8->inst.Y, chip8->V[chip8->inst.Y], chip8->I);
+		break;
+	}
+
 	default:
 		printf("Unimplemented\n");
 		break;
@@ -275,7 +345,7 @@ void emulate_instruction(chip8_t *chip8, const config_t config)
 	chip8->inst.Y = (chip8->inst.opcode >> 4) & 0x0F;
 
 #ifdef DEBUG
-	print_debug_info(chip8);
+	print_debug_info(chip8, config);
 #endif
 
 	// Emulate opcode
@@ -291,30 +361,39 @@ void emulate_instruction(chip8_t *chip8, const config_t config)
 		else if (chip8->inst.NN == 0xEE)
 		{
 			// 0x00EE: Return from subroutine
-			// Set program counter to last addres on subroutine stack so that next opcode will be gotten from that address
+			// Set program counter to last address on subroutine stack so that next opcode will be gotten from that address
 			chip8->PC = *--chip8->stack_ptr;
 		}
 		break;
 	}
+	case 0x01:
+	{
+		// 0x1NNN: Jump to address NNN
+		chip8->PC = chip8->inst.NNN; // Set PC so that next opcode is from NNN.
+		break;
+	}
 	case 0x02:
 	{
-		//
+		// 0x2NNN: Call subroutine at NNN
 		*chip8->stack_ptr++ = chip8->PC; // Store current address to return to on subroutine stack
 		chip8->PC = chip8->inst.NNN;	 // set PC to subroutine address so that the next opcode is gotten from there.
 		break;
 	}
-
 	case 0x06:
 	{
 		// 0x6XNN: Set register VX to NN
-		printf("Set register V%X to NN (0x%02X)\n", chip8->inst.X, chip8->inst.NN);
 		chip8->V[chip8->inst.X] = chip8->inst.NN;
+		break;
 	}
-
+	case 0x07:
+	{
+		// 0x7XNN: Set register VX += NN
+		chip8->V[chip8->inst.X] += chip8->inst.NN;
+		break;
+	}
 	case 0x0A:
 	{
 		// 0xANNN: SET index register I to NNN
-		printf("SET index register I to NNN (0x%04X)\n", chip8->inst.NNN);
 		chip8->I = chip8->inst.NNN;
 		break;
 	}
@@ -324,8 +403,40 @@ void emulate_instruction(chip8_t *chip8, const config_t config)
 		// 0xDXYN: Draw N-height sprite at coords X,Y; Read from mem location I;
 		// Screen pixels are XOR'd with sprite bits,
 		// VF carry flag is set any screen pixles are set off; This is useful for collision detection or other reasons
-		const uint8_t X = chip8->V[chip8->inst.X] % config.window_width;
-		const uint8_t Y = chip8->V[chip8->inst.Y] % config.window_height;
+		uint8_t X_coord = chip8->V[chip8->inst.X] % config.window_width;
+		uint8_t Y_coord = chip8->V[chip8->inst.Y] % config.window_height;
+		const uint8_t orig_X = X_coord; // Оригинална вредност на X
+
+		chip8->V[0xF] = 0; // Иницијализација на carry flag
+
+		// Loop over all N rows of the sprite
+		for (uint8_t i = 0; i < chip8->inst.N; i++)
+		{
+			// Get next byte/row of sprite data
+			const uint8_t sprite_data = chip8->ram[chip8->I + i];
+			X_coord = orig_X;
+
+			for (int8_t j = 7; j >= 0; j--)
+			{
+				// Доколку sprite pixel/bit е вклучен и display pixel е вклучен, пушти carry flag
+				bool *pixel = &chip8->display[Y_coord * config.window_width + X_coord];
+				const bool sprite_bit = (sprite_data & (1 << j));
+				if (sprite_bit && *pixel)
+				{
+					chip8->V[0xF] = 1;
+				}
+				// XOR display pixel со sprite pixel/bit за да го вклучиме или исклучиме
+				*pixel ^= sprite_bit;
+
+				// Престани да црташ ако стигнеш до десниот крај на екранот
+				if (++X_coord >= config.window_width)
+					break;
+			}
+			// Престани да црташ ако стигнеш до долниот крај на екранот
+			if (++Y_coord >= config.window_height)
+				break;
+		}
+		break;
 	}
 
 	default:
@@ -379,7 +490,7 @@ int main(int argc, char **argv)
 		SDL_Delay(16);
 
 		// update Window
-		update_screen(sdl);
+		update_screen(sdl, chip8, config);
 	}
 
 	// Final Cleanup
