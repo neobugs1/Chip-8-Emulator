@@ -20,6 +20,7 @@ typedef struct
 	uint32_t fg_color;		// Foreground color RGBA8888
 	uint32_t bg_color;		// Background color RGBA8888
 	uint32_t scale_factor;	// Amount to scale up the screen (multiplication)
+	bool pixel_outlines;	// Цртај пиксели како да се одделени едни од други (со gap меѓу нив)
 } config_t;
 
 // EMU STATES
@@ -95,6 +96,7 @@ bool set_config_from_args(config_t *config, const int argc, char **argv)
 		.fg_color = 0xFFFF00FF, // YELLER
 		.bg_color = 0x00000000, // BLACK
 		.scale_factor = 20,		// Scale 64x32 by multiplying times 20
+		.pixel_outlines = true, // Draw pixel outlines by default
 	};
 
 	for (int i = 1; i < argc; i++)
@@ -171,9 +173,11 @@ void final_cleanup(const sdl_t sdl)
 }
 
 // Init Screen Clear to background color
-void clear_screen(const sdl_t sdl, const config_t config)
+void clear_screen(const sdl_t sdl, const config_t config, chip8_t *chip8)
 {
-	const uint8_t r = (config.bg_color >> 24) & 0xFF; // maybe dont need 0xFF?
+	memset(&chip8->display[0], false, sizeof chip8->display);
+
+	const uint8_t r = (config.bg_color >> 24) & 0xFF;
 	const uint8_t g = (config.bg_color >> 16) & 0xFF;
 	const uint8_t b = (config.bg_color >> 8) & 0xFF;
 	const uint8_t a = (config.bg_color >> 0) & 0xFF;
@@ -210,6 +214,13 @@ void update_screen(const sdl_t sdl, const chip8_t chip8, const config_t config)
 			// Ако пикселот е вклучен, искористи fg_color
 			SDL_SetRenderDrawColor(sdl.renderer, fg_r, fg_g, fg_b, fg_a);
 			SDL_RenderFillRect(sdl.renderer, &rect);
+
+			// Ако pixel_outline е true цртај ги пикселите поинаку
+			if (config.pixel_outlines)
+			{
+				SDL_SetRenderDrawColor(sdl.renderer, bg_r, bg_g, bg_b, bg_a); // BG COLOR се користи за да се направи црн outline околу секој пиксел
+				SDL_RenderDrawRect(sdl.renderer, &rect);
+			}
 		}
 		else
 		{
@@ -278,7 +289,7 @@ void print_debug_info(chip8_t *chip8, const config_t config)
 		else if (chip8->inst.NN == 0xEE)
 		{
 			// 0x00EE: Return from subroutine
-			// Set program counter to last addres on subroutine stack so that next opcode will be gotten from that address
+			// Set program counter to last address on subroutine stack so that next opcode will be gotten from that address
 			printf("Return from subroutine to address 0x%04X\n", *(chip8->stack_ptr - 1));
 			chip8->PC = *--chip8->stack_ptr;
 		}
@@ -295,7 +306,24 @@ void print_debug_info(chip8_t *chip8, const config_t config)
 		printf("SET Program Counter PC to NNN (0x%04X)\n", chip8->inst.NNN);
 		break;
 	}
-
+	case 0x03:
+	{
+		// 0x3NNN: Skips the next instruction if VX equals NN (usually the next instruction is a jump to skip a code block)
+		printf("Check if V%X (0x%02X) == NN (0x%02X), skip next instruction if true.\n", chip8->inst.X, chip8->V[chip8->inst.X], chip8->inst.NN);
+		break;
+	}
+	case 0x04:
+	{
+		// 0x4NNN: Skips the next instruction if VX doesn't equal NN (usually the next instruction is a jump to skip a code block)
+		printf("Check if V%X (0x%02X) != NN (0x%02X), skip next instruction if true.\n", chip8->inst.X, chip8->V[chip8->inst.X], chip8->inst.NN);
+		break;
+	}
+	case 0x05:
+	{
+		// 0x4NNN: Skips the next instruction if VX equals VY (usually the next instruction is a jump to skip a code block)
+		printf("Check if V%X (0x%02X) == V%X (0x%02X), skip next instruction if true.\n", chip8->inst.X, chip8->V[chip8->inst.X], chip8->inst.Y, chip8->V[chip8->inst.Y]);
+		break;
+	}
 	case 0x06:
 	{
 		// 0x6XNN: Set register VX to NN
@@ -364,6 +392,10 @@ void emulate_instruction(chip8_t *chip8, const config_t config)
 			// Set program counter to last address on subroutine stack so that next opcode will be gotten from that address
 			chip8->PC = *--chip8->stack_ptr;
 		}
+		else
+		{
+			// Unimplemented/invalid opcode, may be 0xNNN for calling machine code routine RCA1802
+		}
 		break;
 	}
 	case 0x01:
@@ -377,6 +409,30 @@ void emulate_instruction(chip8_t *chip8, const config_t config)
 		// 0x2NNN: Call subroutine at NNN
 		*chip8->stack_ptr++ = chip8->PC; // Store current address to return to on subroutine stack
 		chip8->PC = chip8->inst.NNN;	 // set PC to subroutine address so that the next opcode is gotten from there.
+		break;
+	}
+	case 0x03:
+	{
+		// 0x3XNN: Skips the next instruction if VX equals NN (usually the next instruction is a jump to skip a code block)
+		if (chip8->V[chip8->inst.X] == chip8->inst.NN)
+			chip8->PC += 2;
+		break;
+	}
+	case 0x04:
+	{
+		// 0x4XNN: Skips the next instruction if VX doesn't equal NN (usually the next instruction is a jump to skip a code block)
+		if (chip8->V[chip8->inst.X] != chip8->inst.NN)
+			chip8->PC += 2;
+		break;
+	}
+	case 0x05:
+	{
+		// 0x5XY0: Skips the next instruction if VX equals VY (usually the next instruction is a jump to skip a code block)
+		if (chip8->inst.N != 0)
+			break;
+
+		if (chip8->V[chip8->inst.X] == chip8->V[chip8->inst.Y])
+			chip8->PC += 2;
 		break;
 	}
 	case 0x06:
@@ -472,7 +528,7 @@ int main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 
 	// Init Screen Clear to background color
-	clear_screen(sdl, config);
+	clear_screen(sdl, config, &chip8);
 
 	// Main Emulator loop
 	while (chip8.state != QUIT)
