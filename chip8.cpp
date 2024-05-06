@@ -403,6 +403,18 @@ void print_debug_info(chip8_t *chip8, const config_t config)
 			break;
 		}
 	}
+	case 0x09:
+	{
+		// 0x9XY0: Skips the next instruction if VX doesn't equal NN (usually the next instruction is a jump to skip a code block)
+		printf("Check if V%X (0x%02X) != V%X (0x%02X), skip next instruction if true.\n", chip8->inst.X, chip8->V[chip8->inst.X], chip8->inst.Y, chip8->V[chip8->inst.Y]);
+		break;
+	}
+	case 0x0B:
+	{
+		// 0xBNNN: Jump to the address NNN + V0
+		printf("Set PC to V0 (0x%02X) + NNN (0x%04X); Result: PC = %04X\n", chip8->V[0], chip8->inst.NNN, chip8->V[0] + chip8->inst.NNN);
+		break;
+	}
 	case 0x0A:
 	{
 		// 0xANNN: SET index register I to NNN
@@ -540,6 +552,7 @@ void emulate_instruction(chip8_t *chip8, const config_t config)
 			if ((uint16_t)(chip8->V[chip8->inst.X] + chip8->V[chip8->inst.Y]) > 255)
 				chip8->V[0xF] = 1;
 			chip8->V[chip8->inst.X] += chip8->V[chip8->inst.Y];
+			break;
 		case 5:
 			// 0x8XY5: Set register VX -= VY, if there is not a borrow ( result is positive ) set VF to 1
 			if (chip8->V[chip8->inst.X] >= chip8->V[chip8->inst.Y])
@@ -565,6 +578,19 @@ void emulate_instruction(chip8_t *chip8, const config_t config)
 		default:
 			break;
 		}
+	}
+	case 0x09:
+	{
+		// 0x9XY0: If VX != VY, skip next instruction
+		if (chip8->V[chip8->inst.X] != chip8->V[chip8->inst.Y])
+			chip8->PC += 2;
+		break;
+	}
+	case 0x0B:
+	{
+		// 0xBNNN: Jump to the address NNN + V0
+		chip8->PC = chip8->V[0] + chip8->inst.NNN;
+		break;
 	}
 	case 0x0A:
 	{
