@@ -283,7 +283,6 @@ void print_debug_info(chip8_t *chip8, const config_t config)
 		if (chip8->inst.NN == 0xE0)
 		{
 			// 0x00E0: Clear the screen
-			memset(&chip8->display[0], false, sizeof chip8->display);
 			printf("Clean screen\n");
 		}
 		else if (chip8->inst.NN == 0xEE)
@@ -291,8 +290,12 @@ void print_debug_info(chip8_t *chip8, const config_t config)
 			// 0x00EE: Return from subroutine
 			// Set program counter to last address on subroutine stack so that next opcode will be gotten from that address
 			printf("Return from subroutine to address 0x%04X\n", *(chip8->stack_ptr - 1));
-			chip8->PC = *--chip8->stack_ptr;
 		}
+		else
+		{
+			printf("Unimplemented Opcode.\n");
+		}
+
 		break;
 	case 0x01:
 	{
@@ -335,6 +338,70 @@ void print_debug_info(chip8_t *chip8, const config_t config)
 		// 0x7XNN: Set register VX += NN
 		printf("Set register V%X (0x%02X) += NN (0x%02X). Result: 0x%02X\n", chip8->inst.X, chip8->V[chip8->inst.X], chip8->inst.NN, chip8->V[chip8->inst.X] + chip8->inst.NN);
 		break;
+	}
+	case 0x08:
+	{
+		switch (chip8->inst.N)
+		{
+		case 0:
+			// 0x8XY0: Set register VX = VY
+			printf("Set register V%X = V%X (0x%02X)\n", chip8->inst.X, chip8->inst.Y, chip8->V[chip8->inst.Y]);
+			break;
+		case 1:
+			// 0x8XY1: Set register VX |= VY
+			printf("Set register V%X (0x%02X) |= V%X (0x%02X); Result: 0x%02X\n", chip8->inst.X, chip8->V[chip8->inst.X], chip8->inst.Y, chip8->V[chip8->inst.Y], chip8->V[chip8->inst.X] | chip8->V[chip8->inst.Y]);
+			break;
+		case 2:
+			// 0x8XY2: Set register VX &= VY
+			printf("Set register V%X (0x%02X) &= V%X (0x%02X); Result: 0x%02X\n", chip8->inst.X, chip8->V[chip8->inst.X], chip8->inst.Y, chip8->V[chip8->inst.Y], chip8->V[chip8->inst.X] & chip8->V[chip8->inst.Y]);
+			break;
+		case 3:
+			// 0x8XY3: Set register VX ^= VY
+			printf("Set register V%X (0x%02X) ^= V%X (0x%02X); Result: 0x%02X\n", chip8->inst.X, chip8->V[chip8->inst.X], chip8->inst.Y, chip8->V[chip8->inst.Y], chip8->V[chip8->inst.X] ^ chip8->V[chip8->inst.Y]);
+			break;
+		case 4:
+			// 0x8XY4: Set register VX += VY, VF is set to 1 when there's an overflow
+			printf("Set register V%X (0x%02X) += V%X (0x%02X), VF = 1 if carry; Result: 0x%02X, VF = %X\n",
+				   chip8->inst.X, chip8->V[chip8->inst.X],
+				   chip8->inst.Y, chip8->V[chip8->inst.Y],
+				   chip8->V[chip8->inst.X] + chip8->V[chip8->inst.Y],
+				   ((uint16_t)(chip8->V[chip8->inst.X] + chip8->V[chip8->inst.Y]) > 255));
+			break;
+			// If the addition results in a value greater than 255 (since CHIP-8 uses 8-bit registers), an overflow occurs.
+		case 5:
+			// 0x8XY5: Set register VX -= VY, if there is not a borrow ( result is positive ) set VF to 1
+			printf("Set register V%X (0x%02X) -= V%X (0x%02X), VF = 1 if no borrow; Result: 0x%02X, VF = %X\n",
+				   chip8->inst.X, chip8->V[chip8->inst.X],
+				   chip8->inst.Y, chip8->V[chip8->inst.Y],
+				   chip8->V[chip8->inst.X] - chip8->V[chip8->inst.Y],
+				   (chip8->V[chip8->inst.Y] <= chip8->V[chip8->inst.X]));
+			break;
+		case 6:
+			// 0x8XY6: Set register VX >>= 1, store shifted off bit in VF
+			printf("Set register V%X (0x%02X) >>= 1, Result: 0x%02X, VF = %X (shifted off bit)\n",
+				   chip8->inst.X, chip8->V[chip8->inst.X],
+				   chip8->V[chip8->inst.X] & 1,
+				   chip8->V[chip8->inst.X] >>= 1);
+			break;
+		case 7: // TODO
+				// 0x8XY7: Set register VX = VY - VX, set VF to 1 if there is not a borrow ( result is positive )
+			printf("Set register V%X = V%X (0x%02X) - V%X (0x%02X), VF = 1 if no borrow; Result: 0x%02X, VF = %X\n",
+				   chip8->inst.X,
+				   chip8->inst.Y, chip8->V[chip8->inst.Y],
+				   chip8->inst.X, chip8->V[chip8->inst.X],
+				   chip8->V[chip8->inst.Y] - chip8->V[chip8->inst.X],
+				   (chip8->V[chip8->inst.X] <= chip8->V[chip8->inst.Y]));
+			break;
+		case 0xE: // TODO
+				  // 0x8XYE: Set register VX <<= 1, store shifted off bit in VF
+			printf("Set register V%X (0x%02X) <<= 1, VF is the shifted off bit (%X); Result: 0x%02X\n",
+				   chip8->inst.X, chip8->V[chip8->inst.X],
+				   (chip8->V[chip8->inst.X] & 0x80) >> 7,
+				   chip8->V[chip8->inst.X] << 1);
+			break;
+		default:
+			break;
+		}
 	}
 	case 0x0A:
 	{
@@ -446,6 +513,58 @@ void emulate_instruction(chip8_t *chip8, const config_t config)
 		// 0x7XNN: Set register VX += NN
 		chip8->V[chip8->inst.X] += chip8->inst.NN;
 		break;
+	}
+	case 0x08:
+	{
+		switch (chip8->inst.N)
+		{
+		case 0:
+			// 0x8XY0: Set register VX = VY
+			chip8->V[chip8->inst.X] = chip8->V[chip8->inst.Y];
+			break;
+		case 1:
+			// 0x8XY1: Set register VX |= VY
+			chip8->V[chip8->inst.X] |= chip8->V[chip8->inst.Y];
+			break;
+		case 2:
+			// 0x8XY2: Set register VX &= VY
+			chip8->V[chip8->inst.X] &= chip8->V[chip8->inst.Y];
+			break;
+		case 3:
+			// 0x8XY3: Set register VX ^= VY
+			chip8->V[chip8->inst.X] ^= chip8->V[chip8->inst.Y];
+			break;
+		case 4:
+			// 0x8XY4: Set register VX += VY, VF is set to 1 when there's an overflow
+			// If the addition results in a value greater than 255 (since CHIP-8 uses 8-bit registers), an overflow occurs.
+			if ((uint16_t)(chip8->V[chip8->inst.X] + chip8->V[chip8->inst.Y]) > 255)
+				chip8->V[0xF] = 1;
+			chip8->V[chip8->inst.X] += chip8->V[chip8->inst.Y];
+		case 5:
+			// 0x8XY5: Set register VX -= VY, if there is not a borrow ( result is positive ) set VF to 1
+			if (chip8->V[chip8->inst.X] >= chip8->V[chip8->inst.Y])
+				chip8->V[0xF] = 1;
+			chip8->V[chip8->inst.X] -= chip8->V[chip8->inst.Y];
+			break;
+		case 6:
+			// 0x8XY6: Set register VX >>= 1, store shifted off bit in VF
+			chip8->V[0xF] = chip8->V[chip8->inst.X] & 1;
+			chip8->V[chip8->inst.X] >>= 1;
+			break;
+		case 7: // TODO
+			// 0x8XY7: Set register VX = VY - VX, set VF to 1 if there is not a borrow ( result is positive )
+			if (chip8->V[chip8->inst.X] <= chip8->V[chip8->inst.Y])
+				chip8->V[0xF] = 1;
+			chip8->V[chip8->inst.X] = chip8->V[chip8->inst.Y] - chip8->V[chip8->inst.X];
+			break;
+		case 0xE: // TODO
+			// 0x8XYE: Set register VX <<= 1, store shifted off bit in VF
+			chip8->V[0xF] = (chip8->V[chip8->inst.X] & 0x80) >> 7;
+			chip8->V[chip8->inst.X] <<= 1;
+			break;
+		default:
+			break;
+		}
 	}
 	case 0x0A:
 	{
