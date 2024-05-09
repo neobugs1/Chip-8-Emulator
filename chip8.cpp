@@ -14,13 +14,13 @@ typedef struct {
 
 // EMU CONFIG
 typedef struct {
-  uint32_t window_width;   // SDL window width
-  uint32_t window_height;  // SDL window height
-  uint32_t fg_color;       // Foreground color RGBA8888
-  uint32_t bg_color;       // Background color RGBA8888
-  uint32_t scale_factor;   // Amount to scale up the screen (multiplication)
-  bool pixel_outlines;     // Цртај пиксели како да се одделени едни од други (со
-                           // gap меѓу нив)
+  uint32_t window_width;     // SDL window width
+  uint32_t window_height;    // SDL window height
+  uint32_t fg_color;         // Foreground color RGBA8888
+  uint32_t bg_color;         // Background color RGBA8888
+  uint32_t scale_factor;     // Amount to scale up the screen (multiplication)
+  bool pixel_outlines;       // Цртај пиксели како да се одделени едни од други (со gap меѓу нив)
+  uint32_t inst_per_second;  // Инструкции по секунда ( clock rate )
 } config_t;
 
 // EMU STATES
@@ -91,6 +91,7 @@ bool set_config_from_args(config_t *config, const int argc, char **argv) {
       .bg_color = 0x00000000,  // BLACK
       .scale_factor = 20,      // Scale 64x32 by multiplying times 20
       .pixel_outlines = true,  // Draw pixel outlines by default
+      .inst_per_second = 500,  // Number of instructions to emulate in 1 second ( clock rate of CPU )
   };
 
   for (int i = 1; i < argc; i++) {
@@ -778,6 +779,12 @@ void emulate_instruction(chip8_t *chip8, const config_t config) {
     }
   }
 }
+
+void update_timers(chip8_t *chip8) {
+  if (chip8->delay_timer > 0) chip8->delay_timer--;
+  if (chip8->sound_timer > 0) chip8->sound_timer--;
+}
+
 int main(int argc, char **argv) {
   // Default Usage message for args
   if (argc < 2) {
@@ -812,14 +819,21 @@ int main(int argc, char **argv) {
 
     if (chip8.state == PAUSED) continue;
 
+    const uint64_t start_frame_time = SDL_GetPerformanceCounter();
     // Emulate
-    emulate_instruction(&chip8, config);
+    for (uint32_t i = 0; i < config.inst_per_second / 60; i++) emulate_instruction(&chip8, config);
+
+    const uint64_t end_frame_time = SDL_GetPerformanceCounter();
+
+    const double time_elapsed = (double)((end_frame_time - start_frame_time) / 1000) / SDL_GetPerformanceFrequency();
 
     // Delay for 60hz
-    SDL_Delay(16);
+    SDL_Delay(16.67f > time_elapsed ? 16.67f - time_elapsed : 0);
 
     // update Window
     update_screen(sdl, chip8, config);
+    // update delay and sound
+    update_timers(&chip8);
   }
 
   // Final Cleanup
