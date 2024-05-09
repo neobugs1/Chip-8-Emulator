@@ -395,20 +395,17 @@ void print_debug_info(chip8_t *chip8, const config_t config) {
           // If the addition results in a value greater than 255 (since CHIP-8
           // uses 8-bit registers), an overflow occurs.
         case 5:
-          // 0x8XY5: Set register VX -= VY, if there is not a borrow ( result is
-          // positive ) set VF to 1
-          printf(
-              "Set register V%X (0x%02X) -= V%X (0x%02X), VF = 1 if no borrow; "
-              "Result: 0x%02X, VF = %X\n",
-              chip8->inst.X, chip8->V[chip8->inst.X], chip8->inst.Y, chip8->V[chip8->inst.Y], chip8->V[chip8->inst.X] - chip8->V[chip8->inst.Y],
-              (chip8->V[chip8->inst.Y] <= chip8->V[chip8->inst.X]));
+          // 0x8XY5: Set register VX -= VY, if there is not a borrow ( result is positive ) set VF to 1
+          printf("Set register V%X (0x%02X) -= V%X (0x%02X), VF = 1 if no borrow; Result: 0x%02X, VF = %X\n", chip8->inst.X, chip8->V[chip8->inst.X],
+                 chip8->inst.Y, chip8->V[chip8->inst.Y], chip8->V[chip8->inst.X] - chip8->V[chip8->inst.Y],
+                 (chip8->V[chip8->inst.Y] <= chip8->V[chip8->inst.X]));
           break;
         case 6:
           // 0x8XY6: Set register VX >>= 1, store shifted off bit in VF
           printf(
               "Set register V%X (0x%02X) >>= 1, Result: 0x%02X, VF = %X "
               "(shifted off bit)\n",
-              chip8->inst.X, chip8->V[chip8->inst.X], chip8->V[chip8->inst.X] & 1, chip8->V[chip8->inst.X] >>= 1);
+              chip8->inst.X, chip8->V[chip8->inst.X], chip8->V[chip8->inst.X] & 1, chip8->V[chip8->inst.X] >> 1);
           break;
         case 7:  // TODO
                  // 0x8XY7: Set register VX = VY - VX, set VF to 1 if there is
@@ -428,6 +425,7 @@ void print_debug_info(chip8_t *chip8, const config_t config) {
           break;
         default: break;
       }
+      break;
     }
     case 0x09: {
       // 0x9XY0: Skips the next instruction if VX doesn't equal NN (usually the
@@ -519,7 +517,7 @@ void print_debug_info(chip8_t *chip8, const config_t config) {
       }
       break;
       default: printf("Unimplemented\n"); break;
-    }
+    } break;
   }
 }
 #endif
@@ -625,14 +623,13 @@ void emulate_instruction(chip8_t *chip8, const config_t config) {
           chip8->V[chip8->inst.X] += chip8->V[chip8->inst.Y];
           break;
         case 5:
-          // 0x8XY5: Set register VX -= VY, if there is not a borrow ( result
-          // is positive ) set VF to 1
+          // 0x8XY5: Set register VX -= VY, if there is not a borrow ( result is positive ) set VF to 1
           chip8->V[0xF] = (chip8->V[chip8->inst.X] >= chip8->V[chip8->inst.Y]);
           chip8->V[chip8->inst.X] -= chip8->V[chip8->inst.Y];
           break;
         case 6:
           // 0x8XY6: Set register VX >>= 1, store shifted off bit in VF
-          chip8->V[0xF] = chip8->V[chip8->inst.X] & 1;
+          chip8->V[0xF] = chip8->V[chip8->inst.X] & 0x01;
           chip8->V[chip8->inst.X] >>= 1;
           break;
         case 7:  // TODO
@@ -647,6 +644,7 @@ void emulate_instruction(chip8_t *chip8, const config_t config) {
           break;
         default: break;
       }
+      break;
     }
     case 0x09: {
       // 0x9XY0: If VX != VY, skip next instruction
@@ -762,21 +760,22 @@ void emulate_instruction(chip8_t *chip8, const config_t config) {
           // 0xFX55 Register dump V0-VX inclusive to memory offset from I
           // SCHIP does not increment I, Chip-8 does
           for (uint8_t i = 0; i <= chip8->inst.X; i++) {
-            chip8->ram[chip8->I + 1] = chip8->V[i];
+            chip8->ram[chip8->I + i] = chip8->V[i];
           }
           break;
         }
         case 0x65: {
           // 0xFX65 Set register I to sprite location in memory for character in VX (0x0-0xF)
           for (uint8_t i = 0; i <= chip8->inst.X; i++) {
-            chip8->V[i] = chip8->ram[chip8->I + 1];
-            break;
+            chip8->V[i] = chip8->ram[chip8->I + i];
           }
           break;
         }
         default: break;
       }
+      break;
     }
+    default: break;
   }
 }
 
