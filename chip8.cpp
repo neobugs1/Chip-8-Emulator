@@ -165,6 +165,7 @@ void final_cleanup(const sdl_t sdl) {
 // Init Screen Clear to background color
 void clear_screen(const sdl_t sdl, const config_t config, chip8_t *chip8) {
   memset(&chip8->display[0], false, sizeof chip8->display);
+  memset(&chip8->keypad[0], false, sizeof chip8->keypad);
 
   const uint8_t r = (config.bg_color >> 24) & 0xFF;
   const uint8_t g = (config.bg_color >> 16) & 0xFF;
@@ -502,7 +503,7 @@ void print_debug_info(chip8_t *chip8, const config_t config) {
         case 0x33:
           // 0xFX33 Store BCD representation of VX at memory offset from I
           // I = hundred's place, I+1 = ten's place, I+2 one's place
-          printf("Store BCD representation of V%X (0x%02X) at memory from I (0x%04X)\n", chip8->inst.X, chip8->V[chip8->inst.X, chip8->I]);
+          printf("Store BCD representation of V%X (0x%02X) at memory from I (0x%04X)\n", chip8->inst.X, chip8->V[chip8->inst.X], chip8->I);
           break;
         case 0x55:
           // 0xFX55 Register dump V0-VX inclusive to memory offset from I
@@ -715,7 +716,10 @@ void emulate_instruction(chip8_t *chip8, const config_t config) {
           // 0xFX0A: VX = get_key() Чекај додека не е стиснато копче, и внеси го во VX
           bool key_pressed = false;
           for (uint8_t i = 0; i < sizeof chip8->keypad; i++) {
-            if (chip8->keypad[i] == true) chip8->V[chip8->inst.X] = chip8->keypad[i];
+            if (chip8->keypad[i] == true) {
+              chip8->V[chip8->inst.X] = chip8->keypad[i];
+              key_pressed = true;
+            };
           }
           if (!key_pressed) chip8->PC -= 2;
           break;
@@ -791,8 +795,6 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  puts("forsen");
-
   // Init emulator configurations/options
   config_t config = {0};
   if (!set_config_from_args(&config, argc, argv)) exit(EXIT_FAILURE);
@@ -820,12 +822,11 @@ int main(int argc, char **argv) {
 
     const uint64_t start_frame_time = SDL_GetPerformanceCounter();
     // Emulate
-    for (uint32_t i = 0; i < config.inst_per_second / 60; i++) emulate_instruction(&chip8, config);
+    for (uint32_t i = 0; i < 16; i++) emulate_instruction(&chip8, config);
 
     const uint64_t end_frame_time = SDL_GetPerformanceCounter();
 
-    const double time_elapsed = (double)((end_frame_time - start_frame_time) / 1000) / SDL_GetPerformanceFrequency();
-
+    const double time_elapsed = (double)((end_frame_time - start_frame_time) * 1000) / SDL_GetPerformanceFrequency();
     // Delay for 60hz
     SDL_Delay(16.67f > time_elapsed ? 16.67f - time_elapsed : 0);
 
