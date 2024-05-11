@@ -10,6 +10,8 @@
 typedef struct {
   SDL_Window *window;
   SDL_Renderer *renderer;
+  SDL_AudioSpec want, have;
+  SDL_AudioDeviceID dev;
 } sdl_t;
 
 // EMU CONFIG
@@ -44,19 +46,19 @@ typedef struct {
   uint8_t ram[4096];
   emulator_state_t state;
   bool display[64 * 32];  // емулирај пиксели на оригинална Chip8 резолуција
-  uint16_t stack[12];     // Subroutine stack // субрутина е сет од инструкции наменети
-                          // да извршуваат често користени операции во програма
-  uint16_t *stack_ptr;    // stack pointer
-  uint8_t V[16];          // Data registers V0-VF
-  uint16_t I;             // Index register;
-  uint16_t PC;            // Program Counter
-  uint8_t delay_timer;    // Decrements at 60hz when >0
-  uint8_t sound_timer;    // Decrements at 60hz and plays tone when >0
-  bool keypad[16];        // Hexadecimal keypad 0x0-0xF
-  char *rom_name;         // Currently running ROM
-  instruction_t inst;     // Currently executing instruction
+  uint16_t stack[12];  // Subroutine stack // субрутина е сет од инструкции наменети да извршуваат често користени операции во програма
+  uint16_t *stack_ptr;  // stack pointer
+  uint8_t V[16];        // Data registers V0-VF
+  uint16_t I;           // Index register;
+  uint16_t PC;          // Program Counter
+  uint8_t delay_timer;  // Decrements at 60hz when >0
+  uint8_t sound_timer;  // Decrements at 60hz and plays tone when >0
+  bool keypad[16];      // Hexadecimal keypad 0x0-0xF
+  char *rom_name;       // Currently running ROM
+  instruction_t inst;   // Currently executing instruction
 } chip8_t;
 
+// void audio_callback() { return null; }
 // init sdl
 bool init_sdl(sdl_t *sdl, const config_t config) {
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) != 0) {
@@ -78,6 +80,22 @@ bool init_sdl(sdl_t *sdl, const config_t config) {
     return false;
   }
 
+  sdl->want = (SDL_AudioSpec){
+      .freq = 44100, .format = AUDIO_S8, .channels = 1, .samples = 4096,
+      // .callback = audio_callback,
+  };
+
+  sdl->dev = SDL_OpenAudioDevice(NULL, 0, &sdl->want, &sdl->have, 0);
+
+  if (sdl->dev == 0) {
+    SDL_Log("Could not get an audio device %s\n", SDL_GetError());
+    return false;
+  }
+
+  if ((sdl->want.format != sdl->have.format) || (sdl->want.channels != sdl->have.channels)) {
+    SDL_Log("Could not get desired audio spec!\n");
+    return false;
+  }
   return true;  // Success
 }
 
@@ -159,6 +177,7 @@ bool init_chip8(chip8_t *chip8, char rom_name[]) {
 void final_cleanup(const sdl_t sdl) {
   SDL_DestroyRenderer(sdl.renderer);
   SDL_DestroyWindow(sdl.window);
+  SDL_CloseAudioDevice(sdl.dev);
   SDL_Quit();
 }
 
