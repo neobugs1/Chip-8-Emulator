@@ -16,13 +16,16 @@ typedef struct {
 
 // EMU CONFIG
 typedef struct {
-  uint32_t window_width;     // SDL window width
-  uint32_t window_height;    // SDL window height
-  uint32_t fg_color;         // Foreground color RGBA8888
-  uint32_t bg_color;         // Background color RGBA8888
-  uint32_t scale_factor;     // Amount to scale up the screen (multiplication)
-  bool pixel_outlines;       // Цртај пиксели како да се одделени едни од други (со gap меѓу нив)
-  uint32_t inst_per_second;  // Инструкции по секунда ( clock rate )
+  uint32_t window_width;      // SDL window width
+  uint32_t window_height;     // SDL window height
+  uint32_t fg_color;          // Foreground color RGBA8888
+  uint32_t bg_color;          // Background color RGBA8888
+  uint32_t scale_factor;      // Amount to scale up the screen (multiplication)
+  bool pixel_outlines;        // Цртај пиксели како да се одделени едни од други (со gap меѓу нив)
+  uint32_t inst_per_second;   // Инструкции по секунда ( clock rate )
+  uint32_t square_wave_freq;  // Фрекфенција од меандер на звук, пример 440hz
+  uint32_t audio_sample_rate;
+  uint16_t volume;  // Звук
 } config_t;
 
 // EMU STATES
@@ -58,15 +61,30 @@ typedef struct {
   instruction_t inst;   // Currently executing instruction
 } chip8_t;
 
-// void audio_callback() { return null; }
+void audio_callback(void *userdata, uint8_t *stream, int len) {
+  // Fill out stream/audio buffer with data
+  config_t *config = (config_t *)userdata;
+
+  int16_t *audio_data = (int16_t *)stream;
+  static uint32_t running_sample_index = 0;
+  const int32_t square_wave_period = config->audio_sample_rate / config->square_wave_freq;
+  const int32_t half_square_wave_period = square_wave_period / 2;
+
+  //  We are filling out 2 bytes at a time (int16_t), len is in bytes
+  //  If the current chunk of audio for the square wave is the crest of the wave,
+  //  this will add the volume, otherwise it is the trough of the wave, and will add "negative volume"
+  for (int i = 0; i < len / 2; i++) {
+    audio_data[i] = ((running_sample_index++ / half_square_wave_period) % 2) ? config->volume : -config->volume;
+  }
+}
 // init sdl
-bool init_sdl(sdl_t *sdl, const config_t config) {
+bool init_sdl(sdl_t *sdl, config_t *config) {
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) != 0) {
     SDL_Log("Could not initialize SDL subsystems! %s\n", SDL_GetError());
     return false;
   }
-  sdl->window = SDL_CreateWindow("Chip8 Emulator", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, config.window_width * config.scale_factor,
-                                 config.window_height * config.scale_factor, 0);
+  sdl->window = SDL_CreateWindow("Chip8 Emulator", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, config->window_width * config->scale_factor,
+                                 config->window_height * config->scale_factor, 0);
 
   if (!sdl->window) {
     SDL_Log("Could not create window %s\n", SDL_GetError());
@@ -81,8 +99,12 @@ bool init_sdl(sdl_t *sdl, const config_t config) {
   }
 
   sdl->want = (SDL_AudioSpec){
-      .freq = 44100, .format = AUDIO_S8, .channels = 1, .samples = 4096,
-      // .callback = audio_callback,
+      .freq = 44100,       // 44100hz, CD квалитет
+      .format = AUDIO_S8,  // 8 bit
+      .channels = 1,       // моно аудио
+      .samples = 512,
+      .callback = audio_callback,
+      .userdata = config,
   };
 
   sdl->dev = SDL_OpenAudioDevice(NULL, 0, &sdl->want, &sdl->have, 0);
@@ -99,17 +121,20 @@ bool init_sdl(sdl_t *sdl, const config_t config) {
   return true;  // Success
 }
 
-// Set up initial emulator configuration from passed in arguments
+// Почетна емулатор конфигурација од внесени аргументи
 bool set_config_from_args(config_t *config, const int argc, char **argv) {
-  // Defaults
+  // Default
   *config = (config_t){
-      .window_width = 64,      // Chip8 original X resolution
-      .window_height = 32,     // Chip8 original Y resolution
-      .fg_color = 0xFFFF00FF,  // YELLER
-      .bg_color = 0x00000000,  // BLACK
-      .scale_factor = 20,      // Scale 64x32 by multiplying times 20
-      .pixel_outlines = true,  // Draw pixel outlines by default
-      .inst_per_second = 500,  // Number of instructions to emulate in 1 second ( clock rate of CPU )
+      .window_width = 64,          // Chip8 original X resolution
+      .window_height = 32,         // Chip8 original Y resolution
+      .fg_color = 0xFFFF00FF,      // YELLER
+      .bg_color = 0x00000000,      // BLACK
+      .scale_factor = 20,          // Scale 64x32 by multiplying times 20
+      .pixel_outlines = true,      // Draw pixel outlines by default
+      .inst_per_second = 500,      // Number of instructions to emulate in 1 second ( clock rate of CPU )
+      .square_wave_freq = 440,     // 440hz for middle A
+      .audio_sample_rate = 44100,  // CD Quality
+      .volume = 1000,              // INT16_MAX would be max volume
   };
 
   for (int i = 1; i < argc; i++) {
@@ -802,9 +827,14 @@ void emulate_instruction(chip8_t *chip8, const config_t config) {
   }
 }
 
-void update_timers(chip8_t *chip8) {
+void update_timers(const sdl_t sdl, chip8_t *chip8) {
   if (chip8->delay_timer > 0) chip8->delay_timer--;
-  if (chip8->sound_timer > 0) chip8->sound_timer--;
+  if (chip8->sound_timer > 0) {
+    chip8->sound_timer--;
+    SDL_PauseAudioDevice(sdl.dev, 0);  // Play sound
+  } else {
+    SDL_PauseAudioDevice(sdl.dev, 1);  // Pause sound
+  }
 }
 
 int main(int argc, char **argv) {
@@ -820,7 +850,7 @@ int main(int argc, char **argv) {
 
   // Иницијализација на SDL2
   sdl_t sdl;
-  if (!init_sdl(&sdl, config)) exit(EXIT_FAILURE);
+  if (!init_sdl(&sdl, &config)) exit(EXIT_FAILURE);
 
   // Иницијализација на CHIP8
   chip8_t chip8;
@@ -852,7 +882,7 @@ int main(int argc, char **argv) {
     // update Window
     update_screen(sdl, chip8, config);
     // update delay and sound
-    update_timers(&chip8);
+    update_timers(sdl, &chip8);
   }
 
   // Final Cleanup
