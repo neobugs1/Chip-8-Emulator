@@ -59,6 +59,7 @@ typedef struct {
   bool keypad[16];      // Hexadecimal keypad 0x0-0xF
   char *rom_name;       // Currently running ROM
   instruction_t inst;   // Currently executing instruction
+  bool draw;            // Update screen yes/no
 } chip8_t;
 
 void audio_callback(void *userdata, uint8_t *stream, int len) {
@@ -99,9 +100,9 @@ bool init_sdl(sdl_t *sdl, config_t *config) {
   }
 
   sdl->want = (SDL_AudioSpec){
-      .freq = 44100,       // 44100hz, CD квалитет
-      .format = AUDIO_S8,  // 8 bit
-      .channels = 1,       // моно аудио
+      .freq = 44100,           // 44100hz, CD квалитет
+      .format = AUDIO_S16LSB,  // 8 bit
+      .channels = 1,           // моно аудио
       .samples = 512,
       .callback = audio_callback,
       .userdata = config,
@@ -134,7 +135,7 @@ bool set_config_from_args(config_t *config, const int argc, char **argv) {
       .inst_per_second = 500,      // Number of instructions to emulate in 1 second ( clock rate of CPU )
       .square_wave_freq = 440,     // 440hz for middle A
       .audio_sample_rate = 44100,  // CD Quality
-      .volume = 1000,              // INT16_MAX would be max volume
+      .volume = 100,               // INT16_MAX would be max volume
   };
 
   for (int i = 1; i < argc; i++) {
@@ -165,6 +166,7 @@ bool init_chip8(chip8_t *chip8, char rom_name[]) {
       0xF0, 0x80, 0xF0, 0x80, 0xF0,  // E
       0xF0, 0x80, 0xF0, 0x80, 0x80,  // F
   };
+  memset(chip8, 0, sizeof(chip8_t));
 
   // Load font
   memcpy(&chip8->ram[0], font, sizeof(font));
@@ -289,6 +291,12 @@ void handle_input(chip8_t *chip8) {
               puts("==== RESUME ====");
             }
             break;
+
+          case SDLK_TAB:
+            // RESET ROM
+            init_chip8(chip8, chip8->rom_name);
+            break;
+
           case SDLK_1: chip8->keypad[0x1] = true; break;
           case SDLK_2: chip8->keypad[0x2] = true; break;
           case SDLK_3: chip8->keypad[0x3] = true; break;
